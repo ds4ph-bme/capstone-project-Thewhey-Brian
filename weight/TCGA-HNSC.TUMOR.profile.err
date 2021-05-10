@@ -1,0 +1,17 @@
+Average hsq: 0.083 ( 0.00144 ) 
+
+Average crossvalidation R2:
+R2	SE
+top1	0.0531	0.00136
+blup	0.0554	0.00135
+enet	0.0555	0.00143
+bslmm	   NaN	     NA
+lasso	0.0553	0.00144
+BEST	0.0641	
+
+% Model is best:
+top1: 36.2%
+blup: 33.9%
+enet: 17.1%
+bslmm: NaN%
+lasso: 12.8%
