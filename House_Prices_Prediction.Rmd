@@ -1,0 +1,431 @@
+---
+title: "House Prices Prediction"
+runtime: shiny
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: cerulean
+    social: menu
+    #source_code: embed
+    #theme: yeti
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(flexdashboard)
+library(plotly)
+library(ggplot2)
+library(tidyverse)
+library(leaflet)
+library(htmltools)
+library(kableExtra)
+library(knitr)
+load("www/imputed.rda")
+load("www/rf.rda")
+# data_path <- "https://raw.githubusercontent.com/Thewhey-Brian/House_Prices_Prdiction/main/data/house.csv"
+# house <- read_delim(data_path, col_names = T, delim = ",")[, -1] %>% 
+#   mutate_if(is.character, as.factor)
+```
+
+Overview {data-icon="fa-globe"}
+===================================== 
+
+Column {.sidebar} 
+-----------------------------------------------------------------------
+### Options
+```{r}
+selectInput("category", label = h5("Category"), 
+    choices = list("Neighborhood" = "Neighborhood", 
+                   "Overall quality" = "OverallQual", 
+                   "Exterior quality" = "ExterQual", 
+                   "Kitchen quality" = "KitchenQual", 
+                   "Size of garage in car capacity" = "GarageCars", 
+                   "Construction date" = "YearBuilt"), 
+    selected = 1)
+selectInput("sub_category", label = h5("Sub_Category"), 
+    choices = list("Neighborhood" = "Neighborhood", 
+                   "Overall quality" = "OverallQual", 
+                   "Exterior quality" = "ExterQual", 
+                   "Kitchen quality" = "KitchenQual", 
+                   "Size of garage in car capacity" = "GarageCars"), 
+    selected = "OverallQual")
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Sale Prices Distribution
+
+```{r}
+dat <- reactive({
+  return(house)
+})
+ctgy <- reactive({
+  return(input$category)
+})
+sub_ctgy <- reactive({
+  return(input$sub_category)
+})
+renderPlotly({
+  ggplotly(ggplot(dat(), aes(x = !!as.name(ctgy()), y = SalePrice)) +
+      geom_col(aes(fill = !!as.name(sub_ctgy()))) +
+      theme(axis.text.x = element_text(angle = 45)) +
+      labs(x = ctgy(), y = "Sale Prices", title = paste0("Sale Prices by ", ctgy())))
+})
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+### 
+```{r}
+knitr::include_graphics("https://github.com/Thewhey-Brian/House_Prices_Prediction/blob/main/www/Daco_1709506.png?raw=true")
+
+#plot(house %>% select(SalePrice, OverallQual, Neighborhood, GrLivArea, ExterQual, TotalBsmtSF))
+```
+
+### Locations Map
+
+```{r}
+df <- read.csv(textConnection(
+  "Name,Lat,Long
+  Bloomington Heights,42.056644274895284, -93.63526181058937
+veenker, 42.04142369751746, -93.65023742853793
+Bluestem,42.0095650731166, -93.64665830155805
+Briardale,42.053002106739584, -93.62879954388383
+Brookside,42.02884920672281, -93.63032155898088
+Clear Creek,42.03705208507868, -93.64895887214703
+College Creek,42.02269846599868, -93.6515424013471
+Crawford,42.01930934417932, -93.64862271362712
+Edwards,42.01568554384159, -93.68586267036599
+Gilbert,42.10544858571573, -93.64522318500062
+Iowa DOT and Rail Road,42.1276694178863, -93.5561396432164
+Meadow Village,41.992695573405484, -93.6026447015585
+Mitchell,41.99083468027784, -93.60098892853924
+North Ames,42.07682167112102, -93.63118339081626
+Northridge, 42.04809379230197, -93.64674540155703
+Northridge Heights,42.0599643528609, -93.64942838621059
+Northwest Ames,42.02838544966453, -93.69847465364788
+Old Town,42.02915364963401, -93.61433172684566
+South & West of Iowa State University,42.02285281109253, -93.65391104048935
+Sawyer,42.034340963221894, -93.6770872592305
+Sawyer West,42.034411324379725, -93.68651801021988
+Somerset,42.05202886092242, -93.64514354404335
+Stone Brook,42.05974506919148, -93.6376352032556"
+))
+
+leafletOutput("leaflet_map")
+output$leaflet_map <- renderLeaflet({
+  leaflet(df) %>% addTiles() %>% addMarkers(~Long, ~Lat, popup = ~htmlEscape(Name))
+})
+```
+
+
+House Price Analysis {data-icon="fa-signal"}
+=====================================     
+
+## Regression {data-width=250}
+
+### Regression
+
+**Selecting Best Lambda (with cross-validation)**
+```{r}
+library(glmnet)
+set.seed(123)
+dat.train <- house
+X <- model.matrix(SalePrice ~ ., data = dat.train)[, -1]
+Y <- (dat.train$SalePrice - mean(dat.train$SalePrice))/sqrt(var(dat.train$SalePrice))
+lasso_fit <- cv.glmnet(X, Y, alpha = 1)
+best_lambda <- lasso_fit$lambda.min
+best_model <- glmnet(X, Y, alpha = 1, lambda = best_lambda)
+renderPlot({
+  plot(lasso_fit)
+})
+```
+
+###
+**Selected Variables From LASSO Regression**
+```{r}
+fcts <- as.data.frame(as.matrix(coef(best_model))) %>%
+  filter(s0 != 0) %>%
+  arrange(desc(s0)) %>%
+  rownames_to_column(var = "Variables") %>%
+  mutate(Coefficients = round(s0, 6)) %>%
+  select(-s0)
+kbl(fcts) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+```
+
+## Classification {data-width=450}
+### Random Forest
+```{r}
+library(randomForest)
+renderPlot({
+  varImpPlot(rf_m, main = "Variable Importance")
+})
+```
+
+## Classification {data-width=450}
+### Classification Tree
+```{r}
+library(rpart)
+library(rpart.plot)
+set.seed(100)
+house$HighPrice <- ifelse(house$SalePrice >= 180000, 1, 0)
+dat.train <- house[train<-sample(1:nrow(house), floor(nrow(house)*0.7)),]
+dat.test <- house[-train,]
+# Set HighPrice
+house1  <- dat.train[2:81]
+# Build the tree
+tree <- rpart(HighPrice ~ ., data = house1, method = "class",
+              control = rpart.control(minsplit = 10, cp = 0.001))
+tree.pruned <- prune(tree, cp = 0.01511335)
+renderPlot({
+  prp(tree.pruned, cex = 0.6, extra = 0)
+})
+```
+
+
+Predictions {data-icon="fa-chart-line"}
+=====================================   
+
+Column {.sidebar} 
+-----------------------------------------------------------------------
+
+### Inputs
+```{r}
+sliderInput("OverallQual", label = h5("Overall quality"),  value = 6, min = 1, max = 10)
+helpText("10-Very Excellent, 9-Excellent, 8-Very Good, 7-Good, 6-Above Average, 5-Average, 
+       4-Below Average, 3-Fair, 2-Poor, 1-Very Poor")
+
+selectInput("Neighborhood", label = h5("Neighborhood"), 
+    choices = list("Bloomington Heights" = "Blmngtn",
+                  	"Briardale" ="BrDale",
+                  	"Brookside" ="BrkSide",
+                  	"Clear Creek" ="ClearCr",
+                    "College Creek" ="CollgCr",
+                  	"Crawford" ="Crawfor",
+                  	"Edwards" ="Edwards",
+                  	"Gilbert" ="Gilbert",
+                  	"Iowa DOT and Rail Road" ="IDOTRR",
+                  	"Meadow Village" ="MeadowV",
+                  	"Mitchell" ="Mitchel",
+                    "North Ames" ="Names",
+                  	"Northridge" ="NoRidge",
+                  	"Northpark Villa" ="NPkVill",
+                  	"Northwest Ames" ="NWAmes",
+                  	"Old Town" ="OldTown",
+                  	"South & West of Iowa State University" ="SWISU",
+                  	"Sawyer" ="Sawyer",
+                  	"Sawyer West" ="SawyerW",
+                  	"Somerset" ="Somerst",
+                  	"Stone Brook" ="StoneBr"
+                   ), 
+    selected = "OverallQual")
+
+numericInput("GrLivArea", label = h5("Above grade (ground) living area square feet"), value = 1500)
+
+
+sliderInput("ExterQual", label = h5("Exterior quality"), value = 3, min = 1, max = 5)
+helpText("5-Excellent, 4-Good, 3-Average/Typical, 2-Fair, 1-Poor")
+
+sliderInput("GarageCars", label = h5("Size of garage in car capacity"), value = 2, min = 0, max = 10)
+
+numericInput("TotalBsmtSF", label = h5("Total square feet of basement area"), value = 1000)
+
+numericInput("1stFlrSF", label = h5("First Floor square feet"), value = 1000)
+
+numericInput("GarageArea", label = h5("Size of garage in square feet"), value = 500)
+
+sliderInput("KitchenQual", label = h5("Kitchen quality"),  value = 3, min = 1, max = 5)
+helpText("5-Excellent, 4-Good, 3-Average/Typical, 2-Fair, 1-Poor")
+
+sliderInput("YearBuilt", label = h5("Year Built"), value = 1970, min = 1872, max = 2010)
+
+numericInput("2ndFlrSF", label = h5("Second Floor square feet "), value = 500)
+
+numericInput("BsmtFinSF1", label = h5("Finished square feet of basement area"), value = 384)
+
+selectInput("BsmtQual", label = h5("Evaluates the height of the basement"), 
+    choices = list("Excellent" = "Ex", 
+                   "Good" = "Gd", 
+                   "Typical" = "TA", 
+                   "Fair" = "Fa", 
+                   "Poor" = "Po"), 
+    selected = "Ex")
+numericInput("LotArea", label = h5("Lot size in square feet"), value = 10516)
+```
+
+Column {data-width=450}
+-----------------------------------------------------------------------
+
+### Input Summary
+*Please check the Code Book in "About" section for more information of variables.*
+```{r}
+userinput <- reactive({
+  # df_input <- matrix(c(input$OverallQual, input$Neighborhood, input$GrLivArea, input$ExterQual,
+  #                  input$GarageCars, input$TotalBsmtSF, input$'1stFlrSF', input$GarageArea,
+  #                  input$KitchenQual, input$YearBuilt, input$'2ndFlrSF', input$BsmtFinSF1,
+  #                  input$BsmtQual, input$LotArea), nrow = 1)
+  df_input <- data.frame(variable = c("OverallQual", "Neighborhood", "GrLivArea", "ExterQual", "GarageCars", 
+                                      "TotalBsmtSF", '1stFlrSF', "GarageArea", "KitchenQual", "YearBuilt", 
+                                      '2ndFlrSF', "BsmtFinSF1", "BsmtQual", "LotArea"), 
+                         inputs = c(input$OverallQual, input$Neighborhood, input$GrLivArea, input$ExterQual,
+                   input$GarageCars, input$TotalBsmtSF, input$'1stFlrSF', input$GarageArea,
+                   input$KitchenQual, input$YearBuilt, input$'2ndFlrSF', input$BsmtFinSF1,
+                   input$BsmtQual, input$LotArea))
+  return(df_input)
+})
+
+renderDataTable({
+  userinput()
+})
+```
+
+Column {data-width=450}
+-----------------------------------------------------------------------
+
+### Prediction Summary
+
+```{r}
+get_preds <- reactive({
+  house_pred <- house %>%
+    select(OverallQual, Neighborhood, GrLivArea, ExterQual, GarageCars, TotalBsmtSF, 
+           '1stFlrSF', GarageArea, KitchenQual, YearBuilt, '2ndFlrSF', BsmtFinSF1,
+           BsmtQual, LotArea, SalePrice, HighPrice)
+  df_input <- data.frame(input$OverallQual, input$Neighborhood, input$GrLivArea, input$ExterQual,
+                 input$GarageCars, input$TotalBsmtSF, input$'1stFlrSF', input$GarageArea,
+                 input$KitchenQual, input$YearBuilt, input$'2ndFlrSF', input$BsmtFinSF1,
+                 input$BsmtQual, input$LotArea)
+  names(df_input) <- c("OverallQual", "Neighborhood", "GrLivArea", "ExterQual", "GarageCars", 
+                       "TotalBsmtSF", '1stFlrSF', "GarageArea", "KitchenQual", "YearBuilt", 
+                       '2ndFlrSF', "BsmtFinSF1", "BsmtQual", "LotArea")
+  # random forest
+  rf_input <- rbind(house_pred[1, 1:14], df_input)
+  rf_input <- rf_input[-1,]
+  pred_rf <- predict(rf_pred, rf_input)
+  # cart
+  house_pred1 <- house_pred %>%
+      select(-SalePrice)
+  tree1 <- rpart(HighPrice ~ ., data = house_pred1, method = "class",
+                control = rpart.control(minsplit = 10, cp = 0.001))
+  # Prune the tree
+  bestcp1 <- tree1$cptable[which.min(tree1$cptable[, "xerror"]), "CP"]
+  tree.pruned1 <- prune(tree1, cp = bestcp1)
+  pred_cart <- as.numeric(predict(tree.pruned1, df_input, type = "class")) - 1
+  
+  # lasso
+  df_input_lasso <- df_input
+  df_input_lasso$SalePrice <- 1
+  all_data <- rbind(df_input_lasso, house_pred %>% select(-HighPrice))
+  X <- model.matrix(SalePrice ~ ., data = all_data)[, -1]
+  Y <- all_data$SalePrice
+  X_train <- X[-1, ]
+  Y_train <- Y[-1]
+  lasso_fit <- cv.glmnet(X_train, Y_train, alpha = 1)
+  best_lambda <- lasso_fit$lambda.min
+  best_model <- glmnet(X_train, Y_train, alpha = 1, lambda = best_lambda)
+  X_text <- X[1, ]
+  pred_lasso <- predict(best_model, newx = t(X_text))
+  
+  pred_cart <- ifelse(pred_cart == 1, "High Price", "Low Price")
+  
+  out <- data.frame("Prediction Model" = c("Random Forest", "LASSO Regression", "CART"), 
+                    "Predicted Price" = c(round(pred_rf), round(pred_lasso), pred_cart))
+})
+renderDataTable({
+    get_preds()
+})
+
+```
+
+### Neighborhood
+```{r}
+loc <- reactive({
+  return(input$Neighborhood)
+})
+dff <- read.csv(textConnection(
+  "Name,Lat,Long
+Blmngtn,42.056644274895284, -93.63526181058937
+BrDale,42.053002106739584, -93.62879954388383
+BrkSide,42.02884920672281, -93.63032155898088
+ClearCr,42.03705208507868, -93.64895887214703
+CollgCr,42.02269846599868, -93.6515424013471
+Crawfor,42.01930934417932, -93.64862271362712
+Edwards,42.01568554384159, -93.68586267036599
+Gilbert,42.10544858571573, -93.64522318500062
+IDOTRR,42.1276694178863, -93.5561396432164
+MeadowV,41.992695573405484, -93.6026447015585
+Mitchel,41.99083468027784, -93.60098892853924
+Names,42.07682167112102, -93.63118339081626
+NoRidge, 42.04809379230197, -93.64674540155703
+NPkVill,42.0599643528609, -93.64942838621059
+NWAmes,42.02838544966453, -93.69847465364788
+OldTown,42.02915364963401, -93.61433172684566
+SWISU,42.02285281109253, -93.65391104048935
+Sawyer,42.034340963221894, -93.6770872592305
+SawyerW,42.034411324379725, -93.68651801021988
+Somerst,42.05202886092242, -93.64514354404335
+StoneBr,42.05974506919148, -93.6376352032556"
+))
+renderLeaflet({
+  leaflet(dff %>% filter(Name == loc())) %>% 
+    addTiles() %>% 
+    addMarkers(~Long, ~Lat, popup = ~htmlEscape(Name))
+})
+
+```
+
+### Let's see ...
+```{r}
+## Backup plan: need to put images in the www directory
+renderImage({
+  if(get_preds()[[2]][3] == "High Price"){
+    list(src = "www/rich.png", height = 250)
+  }
+  else{
+    list(src = "www/poor.png", height = 250)
+  }
+})
+```
+
+About {data-icon="fa-table"}
+=====================================     
+
++ ## **Team Members: ** 
+
+* #### Brian (Xinyu) Guo 
+[xguo42@jh.edu] --[Johns Hopkins Bloomberg School of Public Health, Department of Biostatistics](https://www.jhsph.edu/departments/biostatistics/)
+
+* #### Qier Meng 
+[qmeng11@jhmi.edu] --[Johns Hopkins Bloomberg School of Public Health, Department of Biostatistics](https://www.jhsph.edu/departments/biostatistics/) 
+
+* #### Sindy Du 
+[xdu15@jhu.edu] --[Johns Hopkins Bloomberg School of Public Health, Department of Biostatistics](https://www.jhsph.edu/departments/biostatistics/) 
+
+* #### Xiaoyan Zhang
+[xzhan251@jhmi.edu] --[MMI in School of Public Health](https://www.jhsph.edu/departments/w-harry-feinstone-department-of-molecular-microbiology-and-immunology/)
+
++ ## **Introduction: ** 
+Thank you for checking out our App! An accurate prediction on the house price is important to prospective homeowners, developers, investors and other real estate market participants. The availability of a house price prediction model helps fill up an important information gap and improve the efficiency of the real estate market. The data is from Kaggle and it describes almost every aspect of the residential homes in Ames, Iowa. By including different explanatory variables chosen from 79, our App is able to predict the sale price of the house. 
+
++ ## **Instruction: ** 
+There are 3 sections. The first section shows the sale prices by different variables along with some geographic features. The second section shows the the importance of each variable when doing prediction using different models. The third section shows the variables selected by the user and the corresponding predicted price.
+
++ ## **Prediction Models: ** 
+Three models are used for prediction, including Random Forest, LASSO Regression, and classification and regression tree (CART). Random Forest and LASSO Regression predict the actual predicted price, while CART predicts whether the house has a high sale price or a low sale price. When CART returns a low sale price, a poor house picture will be displayed. When CART returns a high sale price, a luxury house picture will be displayed.
+
+\
+
+
++ **Data Reference: ** [House Prices - Advanced Regression Techniques: Predict sales prices and practice feature engineering, RFs, and gradient boosting](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/overview)
+
++ **Photo Reference: ** [Bend Custom Home Builders](https://bendcustomhomebuilders.com/custom-homes/)
+
++ **Photo Reference: ** [Poor House](https://unsplash.com/photos/XpMd2mRX7Hk)
+
++ **Photo Reference: ** [Rich House](https://unsplash.com/photos/RKdLlTyjm5g)
+
++ **Code Book: ** [Code Book of House Proces Analysis Data](https://github.com/Thewhey-Brian/House_Prices_Prdiction/blob/main/data/data_description.txt)
+
+
+
