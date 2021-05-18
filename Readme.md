@@ -35,7 +35,7 @@ Our App runs on flexdashboard/Shiny platform in statistical software R. Here is 
 
 + Link to App: https://xinyu-guo.shinyapps.io/House_Prices_Prediction/
 
-+ Link to video:
++ Link to video: https://livejohnshopkins-my.sharepoint.com/:v:/g/personal/xguo42_jh_edu/EXD9doJjcolAnx_H1l8TKx8BF5tm7Nyh1u6w07DmkK-lng?e=89IEUu
 
 + Reference:
 https://www.kaggle.com/c/house-prices-advanced-regression-techniques/overview
